@@ -304,6 +304,11 @@ def light_parse_biom_sparse(biom_f, constructor, read_buffer_size=5000):
         current_chunk = biom_f.read(read_buffer_size)
         current_position += read_buffer_size
 
+    if not found_data:
+        raise Exception, "Did not find data section in biom file"
+    if not found_shape:
+        raise Exception, "Did not find shape attribute in biom file"
+
     biom_f.seek(data_start)
 
     # is data: separated by a space?
