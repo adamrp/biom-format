@@ -262,6 +262,10 @@ def light_parse_biom_sparse(biom_f, constructor, read_buffer_size=5000):
 
     Constructor must match the loaded table type
     """
+    if not constructor:
+        raise AttributeError, ("No constructor specified; constructor must "
+            "be sparse!")
+
     if constructor._biom_matrix_type != "sparse":
         raise AttributeError, "Constructor must be sparse!"
 
@@ -403,12 +407,18 @@ def parse_biom_table(json_fh,constructor=None, try_light_parse=True):
     dense refers to the full / standard matrix representations
 
     If try_light_parse is True, the light_parse_biom_sparse call will be 
-    attempted. If that parse fails, the code will fall back to the regular
-    BIOM parser.
+    attempted assuming the table is a sparse OTU table. If the table should
+    not be constructed as an OTU table, it is necessary to pass
+    try_light_parser=False. If the light parse is attempted and fails,
+    the code will fall back to the regular BIOM parser.
     """
     if try_light_parse:
         try:
-            t = light_parse_biom_sparse(json_fh, constructor)
+            # NOTE: ignoring the argument passed to constructor parameter!
+            # this is a kludge that allows the light parser to try to parse
+            # the table as a sparse otu table. Although this works for now,
+            # this should change in the future...
+            t = light_parse_biom_sparse(json_fh, SparseOTUTable)
         except:
             table_str = ''.join(json_fh)
             t = parse_biom_table_str(table_str, constructor=constructor)
