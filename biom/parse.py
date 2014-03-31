@@ -18,8 +18,9 @@ from biom.table import SparseOTUTable, DenseOTUTable, SparsePathwayTable, \
         SparseTaxonTable, DenseTaxonTable, table_factory, to_sparse,\
         nparray_to_sparseobj, SparseObj
 import json
-from numpy import zeros, asarray, uint32, float64
+from numpy import zeros, empty, asarray, uint32, float64
 from string import strip
+from re import compile
 
 __author__ = "Justin Kuczynski"
 __copyright__ = "Copyright 2011-2013, The BIOM Format Development Team"
@@ -261,42 +262,144 @@ def get_axis_indices(biom_str, to_keep, axis):
 
     return idxs, json.dumps(subset)[1:-1] # trim off { and }
 
-def light_parse_biom_sparse(biom_str, constructor):
+def light_parse_biom_sparse(biom_f, constructor, read_buffer_size=5000):
     """Light-weight BIOM parser for sparse objects
+
+    biom_f should be a file-like object
 
     Constructor must match the loaded table type
     """
+    if not constructor:
+        raise AttributeError, ("No constructor specified; constructor must "
+            "be sparse!")
+
     if constructor._biom_matrix_type != "sparse":
         raise AttributeError, "Constructor must be sparse!"
 
+    # find the data section, walking over file in 5KB chunks. keep an eye
+    # out for the shape attribute, as well
+    shape_patt = compile('"shape".*?\[(\d+), ?(\d+)\]')
+    shape = []
+    found_data = False
+    found_shape = False
+
+    # also keep track of what has been read in so far using pre_data_section
+    pre_data_section = []
+    current_position = original_position = biom_f.tell()
+    current_chunk = biom_f.read(read_buffer_size)
+    while current_chunk and (not found_data or not found_shape):
+        if not found_data:
+            data_start = current_chunk.find('"data"')
+
+            # did we find the data section?
+            if data_start == -1:
+                pre_data_section.append(current_chunk)
+            else:
+                found_data = True
+                pre_data_section.append(current_chunk[:data_start])
+                data_start += current_position
+
+        if not found_shape:
+            shape_start = current_chunk.find('"shape"')
+
+            # did we find the shape section?
+            if shape_start != -1:
+                found_shape = True
+                shape_start += current_position
+                old_pos = biom_f.tell()
+                biom_f.seek(shape_start)
+                shape_section = biom_f.read(100)
+                shape = shape_patt.search(shape_section).groups()
+                biom_f.seek(old_pos)
+
+        current_chunk = biom_f.read(read_buffer_size)
+        current_position += read_buffer_size
+
+    if not found_data:
+        raise Exception, "Did not find data section in biom file"
+    if not found_shape:
+        raise Exception, "Did not find shape attribute in biom file"
+
+    biom_f.seek(data_start)
+
     # is data: separated by a space?
-    data_start = biom_str.find('"data":')
-    if biom_str[data_start + 7] == " ":
+    if biom_f.read(7)[-1] == " ":
         start_idx = data_start + 8
     else:
         start_idx = data_start + 7
 
-    end_idx = biom_str[start_idx:].find(']]') + start_idx
-    data = biom_str[start_idx:end_idx]
-    new_s = biom_str[:start_idx]
-    new_s += '[[0, 0, 1]]'
-    new_s += biom_str[(end_idx + 2):]
-    
-    # get shape
-    start_idx = biom_str.find('"shape":') + 10
-    end_idx = biom_str[start_idx:start_idx + 30].find('],') + start_idx
-    row, col = map(int, biom_str[start_idx:end_idx].replace('[','').split(', '))
+    # seek to the beginning of the data section
+    biom_f.seek(start_idx)
+
+    # figure out how many points there are by counting commas
+    current_chunk = biom_f.read(read_buffer_size)
+    num_points = 0
+    while current_chunk:
+        data_end = current_chunk.find(']]')
+        if data_end == -1:
+            num_points += current_chunk.count(']')
+            current_chunk = biom_f.read(read_buffer_size)
+        else:
+            num_points += current_chunk[:data_end].count(']') + 1
+            break
+
+    # pre-allocate numpy arrays
+    r = empty(num_points)
+    c = empty(num_points)
+    v = empty(num_points)
+
+    # seek back to the beginning of the data section again
+    biom_f.seek(start_idx)
+
+    # create regex for finding data points
+    data_point_patt = compile('\[(\d+), ?(\d+), ?([0-9.]+)\]')
+
+    # read through file untl the end of the data section is reached
+    current_point = 0
+    current_position = start_idx
+    current_chunk = biom_f.read(read_buffer_size)
+    while current_chunk:
+        # parse the current chunk and record the data points
+        for cur_r, cur_c, cur_v in data_point_patt.findall(current_chunk):
+            r[current_point] = uint32(cur_r)
+            c[current_point] = uint32(cur_c)
+            v[current_point] = float64(cur_v)
+            current_point += 1
+
+        # we might read in a partial data point!
+        # find the position of the end of the last FULL datapoint so we can
+        # seek there later before reading in the next chunk.
+        # rfind returns -1 on failure, so if there are no data points, error
+        next_chunk_start = current_chunk.rfind(']')+1
+        if next_chunk_start == 0:
+            raise ValueError, "Data section is not properly formatted!"
+
+        # check for end of data section
+        end_idx = current_chunk.find(']]')
+        if end_idx == -1:
+            # if we haven't found it, read another chunk
+            current_position += next_chunk_start
+            biom_f.seek(current_position)
+            current_chunk = biom_f.read(read_buffer_size)
+        else:
+            # if we have reached it, set the end_idx and exit loop
+            end_idx += current_position + 2
+            break
+
+    new_s = ''.join(pre_data_section)
+    new_s += '"data": [[0, 0, 1]]'
+    biom_f.seek(end_idx)
+    new_s += biom_f.read()
+
+    row, col = map(int, shape)
     data_mat = SparseObj(row, col)
 
-    for rec in data.replace('[','').split('],'):
-        try:
-            r,c,v = rec.split(',')
-        except:
-            raise TypeError, "Data do not appear sparse!"
-            
-        data_mat[uint32(r),uint32(c)] = float64(v)
+    data_mat._coo_rows = r
+    data_mat._coo_cols = c
+    data_mat._coo_values = v
 
     t = parse_biom_table_str(new_s, constructor, data_pump=data_mat)
+    biom_f.seek(original_position)
 
     return t
 
@@ -311,17 +414,23 @@ def parse_biom_table(json_fh,constructor=None, try_light_parse=True):
     dense refers to the full / standard matrix representations
 
     If try_light_parse is True, the light_parse_biom_sparse call will be 
-    attempted. If that parse fails, the code will fall back to the regular
-    BIOM parser.
+    attempted assuming the table is a sparse OTU table. If the table should
+    not be constructed as an OTU table, it is necessary to pass
+    try_light_parser=False. If the light parse is attempted and fails,
+    the code will fall back to the regular BIOM parser.
     """
-    table_str = ''.join(json_fh)
-
     if try_light_parse:
         try:
-            t = light_parse_biom_sparse(table_str, constructor)
+            # NOTE: ignoring the argument passed to constructor parameter!
+            # this is a kludge that allows the light parser to try to parse
+            # the table as a sparse otu table. Although this works for now,
+            # this should change in the future...
+            t = light_parse_biom_sparse(json_fh, SparseOTUTable)
         except:
+            table_str = ''.join(json_fh)
             t = parse_biom_table_str(table_str, constructor=constructor)
     else: 
+        table_str = ''.join(json_fh)
         t = parse_biom_table_str(table_str, constructor=constructor)
     return t
 
