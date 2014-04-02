@@ -9,22 +9,31 @@
 #-----------------------------------------------------------------------------
 
 from __future__ import division
-from biom import __version__
-from biom.exception import BiomParseException
-from biom.table import SparseOTUTable, DenseOTUTable, SparsePathwayTable, \
-        DensePathwayTable, SparseFunctionTable, DenseFunctionTable, \
-        SparseOrthologTable, DenseOrthologTable, SparseGeneTable, \
-        DenseGeneTable, SparseMetaboliteTable, DenseMetaboliteTable,\
-        SparseTaxonTable, DenseTaxonTable, table_factory, to_sparse,\
-        nparray_to_sparseobj, SparseObj
+
 import json
-from numpy import zeros, empty, asarray, uint32, float64
 from string import strip
 from re import compile
 
+from numpy import zeros, empty, asarray, uint32, float64
+
+from biom import __version__
+from biom.exception import BiomParseException
+from biom.table import (
+    SparseOTUTable, DenseOTUTable, SparsePathwayTable,
+    DensePathwayTable, SparseFunctionTable, DenseFunctionTable,
+    SparseOrthologTable, DenseOrthologTable, SparseGeneTable,
+    DenseGeneTable, SparseMetaboliteTable, DenseMetaboliteTable,
+    SparseTaxonTable, DenseTaxonTable, table_factory, to_sparse,
+    nparray_to_sparseobj, SparseObj
+)
+from biom.backends.csmat import CSMat
+from biom.backends.scipysparse import ScipySparseMat
+
 __author__ = "Justin Kuczynski"
 __copyright__ = "Copyright 2011-2013, The BIOM Format Development Team"
-__credits__ = ["Justin Kuczynski", "Daniel McDonald", "Greg Caporaso", "Jose Carlos Clemente Litran","Morgan Langille"]
+__credits__ = ["Justin Kuczynski", "Daniel McDonald", "Greg Caporaso",
+               "Jose Carlos Clemente Litran", "Morgan Langille",
+               "Adam Robbins-Pianka"]
 __license__ = "BSD"
 __url__ = "http://biom-format.org"
 __maintainer__ = "Daniel McDonald"
@@ -392,11 +401,16 @@ def light_parse_biom_sparse(biom_f, constructor, read_buffer_size=5000):
     new_s += biom_f.read()
 
     row, col = map(int, shape)
-    data_mat = SparseObj(row, col)
 
-    data_mat._coo_rows = r
-    data_mat._coo_cols = c
-    data_mat._coo_values = v
+    if SparseObj == CSMat:
+        data_mat = SparseObj(row, col)
+        data_mat._coo_rows = r
+        data_mat._coo_cols = c
+        data_mat._coo_values = v
+    elif SparseObj == ScipySparseMat:
+        data_mat = SparseObj(row, col, dtype=float64, data=(v, (r, c)))
+    else:
+        raise Exception("Unknown backend")
 
     t = parse_biom_table_str(new_s, constructor, data_pump=data_mat)
     biom_f.seek(original_position)
