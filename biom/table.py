@@ -1504,7 +1504,7 @@ class Table(object):
         return self.__class__(self._conv_to_self_type(vals), sample_ids[:],
                               obs_ids[:], sample_md, obs_md)
 
-    def format_hdf5(self, h5grp, generated_by):
+    def format_hdf5(self, h5grp, generated_by, compression=None):
         """Store CSC and CSR in place
 
         The expected structure of this group is below. A few basic definitions,
@@ -1563,26 +1563,30 @@ class Table(object):
 
             grp.create_dataset('data', shape=(len_data,),
                                dtype=np.float64,
-                               data=self._data._matrix.data)
+                               data=self._data._matrix.data,
+                               compression=compression)
             grp.create_dataset('indices', shape=(len_data,),
                                dtype=np.int32,
-                               data=self._data._matrix.indices)
+                               data=self._data._matrix.indices,
+                               compression=compression)
             grp.create_dataset('indptr', shape=(len_indptr,),
                                dtype=np.int32,
-                               data=self._data._matrix.indptr)
+                               data=self._data._matrix.indptr,
+                               compression=compression)
 
             ### if we store IDs in the table as numpy arrays then this store
             ### is cleaner, as is the parse
             grp.create_dataset('ids', shape=(len_ids,),
                                dtype=H5PY_VLEN_STR,
-                               data=[str(i) for i in ids])
+                               data=[str(i) for i in ids],
+                               compression=compression)
 
             if md is not None:
                 md_str = empty(shape=(), dtype=object)
                 md_str[()] = dumps(md)
                 grp.create_dataset('metadata', shape=(1,),
                                    dtype=H5PY_VLEN_STR,
-                                   data=md_str)
+                                   data=md_str, compression=compression)
 
         h5grp.attrs['id'] = self.TableId if self.TableId else "No Table ID"
         h5grp.attrs['type'] = self.Type
