@@ -1783,7 +1783,7 @@ class Table(object):
         [./sample/metadata]          : Optional, JSON str, in index order
                                        with ids
 
-        Paramters
+        Parameters
         ---------
         h5grp : a h5py ``Group`` or an open h5py ``File``
         samples: iterable, optional
@@ -1973,7 +1973,7 @@ class Table(object):
         [./sample/metadata]          : Optional, JSON str, in index order
                                        with ids
 
-        Paramters
+        Parameters
         ---------
         h5grp : a h5py ``Group`` or an open h5py ``File``
         generated_by : str
