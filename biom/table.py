@@ -2975,8 +2975,7 @@ html
             def vlen_list_of_str_parser(value):
                 """Parses the taxonomy value"""
                 # Remove the empty string values and return the results as list
-                new_value = value[np.where(
-                    value == np.array(""), False, True)].tolist()
+                new_value = value[value != np.array("")].tolist()
                 return new_value if new_value else None
 
             parser = defaultdict(lambda: general_parser)
